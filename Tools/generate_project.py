@@ -3,7 +3,6 @@
 from pathlib import Path
 import argparse, hashlib, json, subprocess
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--with-asset-catalog', action='store_true')
 parser.add_argument('--development-team', help='Set the signing Team ID for all targets; otherwise preserve existing selections.')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
@@ -30,7 +29,7 @@ if project_file.exists():
             configuration = existing_objects[identifier]
             settings = configuration.get('buildSettings', {})
             existing_settings[key, configuration['name']] = {
-                field: settings[field] for field in ('DEVELOPMENT_TEAM', 'PRODUCT_BUNDLE_IDENTIFIER') if field in settings
+                field: settings[field] for field in ('DEVELOPMENT_TEAM', 'PRODUCT_BUNDLE_IDENTIFIER', 'MARKETING_VERSION', 'CURRENT_PROJECT_VERSION') if field in settings
             }
 objects = {}
 def uid(key): return hashlib.sha1(key.encode()).hexdigest()[:24].upper()
@@ -52,8 +51,8 @@ for path in sorted((root/'Resources').rglob('*')):
         rel = path.relative_to(root).as_posix()
         typ = {'.strings': 'text.plist.strings', '.xcprivacy': 'text.xml', '.png': 'image.png'}.get(path.suffix, 'file')
         ref, build = buildfile(rel, typ); refs.append(ref); resources.append(build)
-if args.with_asset_catalog:
-    ref, build = buildfile('Resources/Assets.xcassets', 'folder.assetcatalog'); refs.append(ref); resources.append(build)
+# The asset catalog supplies the App Store icon; App Store Connect rejects builds without it.
+ref, build = buildfile('Resources/Assets.xcassets', 'folder.assetcatalog'); refs.append(ref); resources.append(build)
 # localized permission strings as PBXVariantGroup to avoid duplicate output names
 for filename in ['InfoPlist.strings', 'Localizable.strings']:
     localized = [r for r in refs if objects[r].get('path','').endswith(filename)]
@@ -89,7 +88,7 @@ def configs(key, extra):
 app_target=uid('app-target'); test_target=uid('test-target'); unit_target=uid('unit-target'); project_id=uid('project')
 proxy=add('proxy', isa='PBXContainerItemProxy', containerPortal=project_id, proxyType='1', remoteGlobalIDString=app_target, remoteInfo='Seednote')
 dep=add('dependency', isa='PBXTargetDependency', target=app_target, targetProxy=proxy)
-add('app-target', isa='PBXNativeTarget', buildConfigurationList=configs('app-config',{'PRODUCT_BUNDLE_IDENTIFIER':'com.seednote.app','PRODUCT_NAME':'$(TARGET_NAME)','INFOPLIST_FILE':'Resources/Info.plist', 'MARKETING_VERSION':'0.1.0','CURRENT_PROJECT_VERSION':'1','ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon' if args.with_asset_catalog else ''}), buildPhases=[phase('app-sources','PBXSourcesBuildPhase',sources),phase('app-frameworks','PBXFrameworksBuildPhase',[]),phase('app-resources','PBXResourcesBuildPhase',resources)],buildRules=[],dependencies=[],name='Seednote',productName='Seednote',productReference=app,productType='com.apple.product-type.application')
+add('app-target', isa='PBXNativeTarget', buildConfigurationList=configs('app-config',{'PRODUCT_BUNDLE_IDENTIFIER':'com.seednote.app','PRODUCT_NAME':'$(TARGET_NAME)','INFOPLIST_FILE':'Resources/Info.plist', 'MARKETING_VERSION':'0.1.0','CURRENT_PROJECT_VERSION':'1','ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon'}), buildPhases=[phase('app-sources','PBXSourcesBuildPhase',sources),phase('app-frameworks','PBXFrameworksBuildPhase',[]),phase('app-resources','PBXResourcesBuildPhase',resources)],buildRules=[],dependencies=[],name='Seednote',productName='Seednote',productReference=app,productType='com.apple.product-type.application')
 add('test-target', isa='PBXNativeTarget', buildConfigurationList=configs('test-config',{'PRODUCT_BUNDLE_IDENTIFIER':'com.seednote.app.uitests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_TARGET_NAME':'Seednote'}), buildPhases=[phase('test-sources','PBXSourcesBuildPhase',test_sources),phase('test-frameworks','PBXFrameworksBuildPhase',[])],buildRules=[],dependencies=[dep],name='SeednoteUITests',productName='SeednoteUITests',productReference=test,productType='com.apple.product-type.bundle.ui-testing')
 add('unit-target', isa='PBXNativeTarget', buildConfigurationList=configs('unit-config',{'PRODUCT_BUNDLE_IDENTIFIER':'com.seednote.app.apptests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/Seednote.app/Seednote','BUNDLE_LOADER':'$(TEST_HOST)'}), buildPhases=[phase('unit-sources','PBXSourcesBuildPhase',unit_sources),phase('unit-frameworks','PBXFrameworksBuildPhase',[])],buildRules=[],dependencies=[dep],name='SeednoteAppTests',productName='SeednoteAppTests',productReference=unit,productType='com.apple.product-type.bundle.unit-test')
 add('project', isa='PBXProject', attributes={'LastUpgradeCheck':'2630','TargetAttributes':{test_target:{'TestTargetID':app_target},unit_target:{'TestTargetID':app_target}}},buildConfigurationList=configs('project-config',{}),compatibilityVersion='Xcode 14.0',developmentRegion='en',hasScannedForEncodings='0',knownRegions=['en','Base','zh-Hans'],mainGroup=group,productRefGroup=products,projectDirPath='',projectRoot='',targets=[app_target,test_target,unit_target])
