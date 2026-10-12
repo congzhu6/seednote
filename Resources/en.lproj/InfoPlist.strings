@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Record your thought when you tap the microphone. Recordings stay in your local Seednote library.";
+"NSSpeechRecognitionUsageDescription" = "Turn a recording into editable text using on-device recognition when available. Seednote does not use cloud transcription.";
