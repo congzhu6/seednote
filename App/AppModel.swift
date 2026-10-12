@@ -178,7 +178,7 @@ import AVFoundation
             self.pendingAudioRequiresReview = true
             self.errorMessage = message
         }
-        if draft.note.transcriptStatus == "processing" || draft.note.ocrStatus == "processing" {
+        if draft.note.transcriptState == .processing || draft.note.ocrState == .processing {
             interruptRecognition()
             do { try flush() } catch { errorMessage = error.localizedDescription }
         }
@@ -224,18 +224,18 @@ import AVFoundation
             guard !invalidated else { return }
             try store.attach(prepared, fileExtension: "jpg", to: &draft, kind: .image)
             imageVersion += 1; cancelImageRecognition()
-            draft.note.ocrText = ""; draft.note.ocrStatus = ""
+            draft.note.ocrText = ""; draft.note.ocrState = .notStarted
             try flush()
         } catch { errorMessage = error.localizedDescription }
     }
     func removeImage() {
         imageVersion += 1; cancelImageRecognition()
-        draft.note.imageName = nil; draft.note.ocrStatus = ""
+        draft.note.imageName = nil; draft.note.ocrState = .notStarted
         schedulePersistence()
     }
     func removeAudio() {
         player.stop(); transcriptVersion += 1; cancelTranscription()
-        draft.note.audioName = nil; draft.note.audioDuration = 0; draft.note.transcriptStatus = ""
+        draft.note.audioName = nil; draft.note.audioDuration = 0; draft.note.transcriptState = .notStarted
         schedulePersistence()
     }
     func setSource(_ value: String, asLink: Bool) throws {
@@ -290,7 +290,7 @@ import AVFoundation
         var replacement = draft
         try store.attach(data, fileExtension: "m4a", to: &replacement, kind: .audio)
         replacement.note.audioDuration = min(candidate.duration, 180)
-        replacement.note.transcript = ""; replacement.note.transcriptStatus = ""
+        replacement.note.transcript = ""; replacement.note.transcriptState = .notStarted
         // Persist before replacing the in-memory attachment. Failed persistence keeps the earlier audio usable.
         try store.saveDraft(replacement)
         transcriptVersion += 1; cancelTranscription()
@@ -309,13 +309,13 @@ import AVFoundation
     private func cancelTranscription() {
         transcriptionGeneration = UUID()
         transcriber.cancel(); transcriptionTask?.cancel(); transcriptionTask = nil
-        if isTranscribing || draft.note.transcriptStatus == "processing" { draft.note.transcriptStatus = "interrupted" }
+        if isTranscribing || draft.note.transcriptState == .processing { draft.note.transcriptState = .interrupted }
         isTranscribing = false
     }
     private func cancelImageRecognition() {
         recognitionGeneration = UUID()
         recognitionTask?.cancel(); recognitionTask = nil
-        if isRecognizing || draft.note.ocrStatus == "processing" { draft.note.ocrStatus = "interrupted" }
+        if isRecognizing || draft.note.ocrState == .processing { draft.note.ocrState = .interrupted }
         isRecognizing = false
     }
     private func interruptRecognition() {
@@ -331,7 +331,7 @@ import AVFoundation
         player.stop(); isTranscribing = true
         let version = transcriptVersion
         let original = draft.note.transcript
-        draft.note.transcriptStatus = "processing"
+        draft.note.transcriptState = .processing
         let generation = UUID(); transcriptionGeneration = generation
         do { try flush() } catch { cancelTranscription(); errorMessage = error.localizedDescription; return }
         transcriptionTask = Task { [weak self] in
@@ -340,11 +340,11 @@ import AVFoundation
             do {
                 let text = try await self.transcriber.transcribe(url: url, localeIdentifier: self.speechLocale)
                 guard !self.invalidated, !Task.isCancelled, self.transcriptionGeneration == generation, self.transcriptVersion == version, self.draft.note.transcript == original else { return }
-                self.draft.note.transcript = text; self.draft.note.transcriptStatus = "complete"
+                self.draft.note.transcript = text; self.draft.note.transcriptState = .complete
                 try self.flush()
             } catch {
                 guard !self.invalidated, !Task.isCancelled, self.transcriptionGeneration == generation else { return }
-                self.draft.note.transcriptStatus = "unavailable"
+                self.draft.note.transcriptState = .unavailable
                 self.errorMessage = error.localizedDescription
                 try? self.flush()
             }
@@ -353,7 +353,7 @@ import AVFoundation
     func recognizeImage() {
         guard let url = asset(draft.note.imageName), !isRecognizing else { return }
         isRecognizing = true
-        draft.note.ocrStatus = "processing"
+        draft.note.ocrState = .processing
         let generation = UUID(); recognitionGeneration = generation
         do { try flush() } catch { cancelImageRecognition(); errorMessage = error.localizedDescription; return }
         let version = imageVersion
@@ -364,12 +364,12 @@ import AVFoundation
                 let data = try Data(contentsOf: url)
                 let text = try await ImageService.recognize(data)
                 guard !self.invalidated, !Task.isCancelled, self.recognitionGeneration == generation, self.imageVersion == version else { return }
-                self.draft.note.ocrText = text; self.draft.note.ocrStatus = "complete"
+                self.draft.note.ocrText = text; self.draft.note.ocrState = .complete
                 try self.flush()
             } catch {
                 guard !self.invalidated, !Task.isCancelled, self.recognitionGeneration == generation else { return }
                 self.errorMessage = error.localizedDescription
-                self.draft.note.ocrStatus = "unavailable"; try? self.flush()
+                self.draft.note.ocrState = .unavailable; try? self.flush()
             }
         }
     }

@@ -198,7 +198,7 @@ struct DetailView: View {
                 SectionCaption(text: L("Voice transcript", "语音转写"))
                 Text(note.transcript).font(.body).lineSpacing(4).textSelection(.enabled)
                     .accessibilityIdentifier("detailTranscript")
-            } else if note.audioName != nil && ["unavailable", "interrupted", "processing"].contains(note.transcriptStatus) {
+            } else if note.audioName != nil && (note.transcriptState.didNotFinish || note.transcriptState == .processing) {
                 Text(L("Transcription did not finish. Edit this idea to retry when the recording and language support are available.", "转写尚未完成。录音和语言支持可用时，可通过编辑重试。"))
                     .font(.subheadline).foregroundStyle(Theme.muted)
             }

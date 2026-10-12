@@ -9,18 +9,17 @@ private enum MediaError: LocalizedError {
     case recognitionFailed, recognitionTimedOut
 
     var errorDescription: String? {
-        let chinese = Locale.current.language.languageCode?.identifier == "zh"
         switch self {
-        case .microphoneDenied: return chinese ? "麦克风权限未开启，请到系统设置中允许录音。" : "Microphone access is disabled. Allow recording in Settings."
-        case .recordingUnavailable: return chinese ? "无法开始录音，请检查麦克风是否可用。" : "Recording could not start. Check that a microphone is available."
-        case .noRecording: return chinese ? "当前没有正在录制的音频。" : "There is no active recording."
-        case .invalidRecording: return chinese ? "录音文件无效，请重试。" : "The recording file is invalid. Please try again."
-        case .playbackUnavailable: return chinese ? "无法播放这段录音。" : "This recording could not be played."
-        case .speechDenied: return chinese ? "语音识别权限未开启，请到系统设置中允许使用。" : "Speech recognition access is disabled. Allow it in Settings."
-        case .speechUnavailable: return chinese ? "当前无法使用语音识别。" : "Speech recognition is currently unavailable."
-        case .onDeviceUnavailable: return chinese ? "此设备不支持所选语言的离线语音识别。" : "On-device recognition is unavailable for this language on this device."
-        case .recognitionFailed: return chinese ? "未能识别这段录音中的文字。" : "Speech could not be recognized from this recording."
-        case .recognitionTimedOut: return chinese ? "语音识别超时，请重试。" : "Speech recognition timed out. Please try again."
+        case .microphoneDenied: return L("Microphone access is disabled. Allow recording in Settings.", "麦克风权限未开启，请到系统设置中允许录音。")
+        case .recordingUnavailable: return L("Recording could not start. Check that a microphone is available.", "无法开始录音，请检查麦克风是否可用。")
+        case .noRecording: return L("There is no active recording.", "当前没有正在录制的音频。")
+        case .invalidRecording: return L("The recording file is invalid. Please try again.", "录音文件无效，请重试。")
+        case .playbackUnavailable: return L("This recording could not be played.", "无法播放这段录音。")
+        case .speechDenied: return L("Speech recognition access is disabled. Allow it in Settings.", "语音识别权限未开启，请到系统设置中允许使用。")
+        case .speechUnavailable: return L("Speech recognition is currently unavailable.", "当前无法使用语音识别。")
+        case .onDeviceUnavailable: return L("On-device recognition is unavailable for this language on this device.", "此设备不支持所选语言的离线语音识别。")
+        case .recognitionFailed: return L("Speech could not be recognized from this recording.", "未能识别这段录音中的文字。")
+        case .recognitionTimedOut: return L("Speech recognition timed out. Please try again.", "语音识别超时，请重试。")
         }
     }
 }

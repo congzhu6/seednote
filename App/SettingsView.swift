@@ -129,7 +129,7 @@ struct SettingsView: View {
 
     private func setupStatus(for origin: CaptureSetupOrigin) -> String {
         _ = setupRevision
-        switch CaptureSetupTracker.shared.progress(for: origin).status {
+        switch model.captureTracker.progress(for: origin).status {
         case .notStarted:
             switch origin {
             case .screenshotShortcut:

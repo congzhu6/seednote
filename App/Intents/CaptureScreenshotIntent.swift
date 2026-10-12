@@ -26,7 +26,7 @@ struct CaptureScreenshotIntent: AppIntent {
             imageData: data,
             sourceURL: nil,
             sourceText: nil,
-            origin: "shortcutScreenshot",
+            origin: CaptureSetupOrigin.screenshotShortcut.rawValue,
             trace: trace
         )
         return .result()
