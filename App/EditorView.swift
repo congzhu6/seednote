@@ -92,6 +92,8 @@ struct EditorView: View {
                 ToolbarItemGroup(placement: .keyboard) { Spacer(); Button(L("Done", "完成")) { thoughtFocused = false } }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { recordingControls }
+            .noticeBanner($model.notice)
+            .onAppear { model.editorDidAppear(session.id) }
             .onChange(of: photo) { _, value in
                 guard let value else { return }
                 guard !session.isImporting else { return }
@@ -124,7 +126,7 @@ struct EditorView: View {
         }
     }
     @ViewBuilder private var sourceArea: some View {
-        if let name = session.draft.note.imageName, let url = session.asset(name), let image = UIImage(contentsOfFile: url.path) {
+        if let name = session.draft.note.imageName, let image = StoredImage.thumbnail(session.asset(name), filling: CGSize(width: 56, height: 65)) {
             HStack(spacing: 13) {
                 Button { showImage = true } label: {
                     Image(uiImage: image).resizable().scaledToFill().frame(width: 56, height: 65).clipped().clipShape(RoundedRectangle(cornerRadius: 7))
@@ -227,13 +229,11 @@ struct EditorView: View {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(L("Recording your thought", "正在记录你的想法")).font(.caption).foregroundStyle(Theme.muted)
-                            Text(session.recorder.duration.clockText).font(.system(size: 48, weight: .light, design: .monospaced)).monospacedDigit()
+                            RecordingDuration(recorder: session.recorder)
                         }; Spacer()
                         Button { session.stopRecording() } label: { Image(systemName: "stop.fill").font(.system(size: 21)).foregroundStyle(Theme.paper).frame(width: 66, height: 66).background(Theme.red, in: Circle()) }.accessibilityLabel(L("Stop recording", "停止录音"))
                     }
-                    GeometryReader { geometry in
-                        Capsule().fill(Theme.line).overlay(alignment: .leading) { Capsule().fill(Theme.red).frame(width: max(4, geometry.size.width * CGFloat(session.recorder.power))) }
-                    }.frame(height: 4).accessibilityLabel(L("Microphone level", "麦克风音量"))
+                    RecordingLevel(recorder: session.recorder)
                     Text(L("Up to 3 minutes · original audio kept", "最长 3 分钟 · 保留原始音频")).font(.caption).foregroundStyle(Theme.muted)
                 }.padding(22).background(Theme.surface, in: RoundedRectangle(cornerRadius: 27))
             } else if session.draft.note.audioName == nil && !thoughtFocused && typeSize.isAccessibilitySize {
@@ -261,6 +261,23 @@ struct EditorView: View {
             }.buttonStyle(PillButtonStyle(secondary: saveUnavailable)).accessibilityIdentifier("saveIdea")
                 .disabled(saveUnavailable)
         }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 12).background(Theme.paper)
+    }
+}
+
+/// Only these views observe the meter values that change ten times a second while recording.
+private struct RecordingDuration: View {
+    @ObservedObject var recorder: AudioRecorder
+    var body: some View {
+        Text(recorder.duration.clockText).font(.system(size: 48, weight: .light, design: .monospaced)).monospacedDigit()
+    }
+}
+
+private struct RecordingLevel: View {
+    @ObservedObject var recorder: AudioRecorder
+    var body: some View {
+        GeometryReader { geometry in
+            Capsule().fill(Theme.line).overlay(alignment: .leading) { Capsule().fill(Theme.red).frame(width: max(4, geometry.size.width * CGFloat(recorder.power))) }
+        }.frame(height: 4).accessibilityLabel(L("Microphone level", "麦克风音量"))
     }
 }
 

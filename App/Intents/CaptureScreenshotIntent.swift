@@ -20,15 +20,15 @@ struct CaptureScreenshotIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        let trace = PerfTrace.begin("Capture", "Screenshot capture → editor")
         let data = screenshot.data
-        try await MainActor.run {
-            try AppModel.shared.receive(
-                imageData: data,
-                sourceURL: nil,
-                sourceText: nil,
-                origin: "shortcutScreenshot"
-            )
-        }
+        try await AppModel.shared.receive(
+            imageData: data,
+            sourceURL: nil,
+            sourceText: nil,
+            origin: "shortcutScreenshot",
+            trace: trace
+        )
         return .result()
     }
 }

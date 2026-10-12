@@ -52,6 +52,39 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+/// A short confirmation at the top of the screen that clears itself, such as
+/// "Idea saved" or "New material is waiting in your drafts" (PRD 6.1).
+struct NoticeBanner: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if let message {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(Theme.surface, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.line))
+                    .padding(.top, 8).padding(.horizontal, 24)
+                    .allowsHitTesting(false)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityIdentifier("noticeBanner")
+                    .task(id: message) {
+                        AccessibilityNotification.Announcement(message).post()
+                        try? await Task.sleep(for: .seconds(3))
+                        if self.message == message { self.message = nil }
+                    }
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: message)
+    }
+}
+
+extension View {
+    func noticeBanner(_ message: Binding<String?>) -> some View { modifier(NoticeBanner(message: message)) }
+}
+
 struct SharePayload: Identifiable {
     let id = UUID()
     let items: [Any]

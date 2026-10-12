@@ -21,21 +21,22 @@ struct ReceiveSharedMaterialIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        let trace = PerfTrace.begin("Capture", "Shared material → editor")
         let imageData = image?.data
         let url = link?.absoluteString
 
         guard imageData != nil || url != nil || selectedText != nil else {
+            PerfTrace.end(trace, outcome: "no input")
             throw SeednoteShortcutError.noInput
         }
 
-        try await MainActor.run {
-            try AppModel.shared.receive(
-                imageData: imageData,
-                sourceURL: url,
-                sourceText: selectedText,
-                origin: "shortcutShare"
-            )
-        }
+        try await AppModel.shared.receive(
+            imageData: imageData,
+            sourceURL: url,
+            sourceText: selectedText,
+            origin: "shortcutShare",
+            trace: trace
+        )
         return .result()
     }
 }

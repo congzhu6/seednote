@@ -30,6 +30,25 @@ final class ImageServiceTests: XCTestCase {
         XCTAssertEqual(decoded.height, 600)
     }
 
+    func testStoredImageThumbnailIsDecodedAtDisplaySizeAndCached() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("StoredImageTests-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        // A stored screenshot is at most 2400 pixels on its long edge.
+        let url = directory.appendingPathComponent(UUID().uuidString + ".jpg")
+        try ImageService.prepare(try XCTUnwrap(image(width: 1107, height: 2400).pngData())).write(to: url)
+
+        let thumbnail = try XCTUnwrap(StoredImage.thumbnail(url, filling: CGSize(width: 56, height: 65)))
+        let pixels = try XCTUnwrap(thumbnail.cgImage)
+        // Covers 56×65 points at 3x without decoding the full image.
+        XCTAssertGreaterThanOrEqual(pixels.width, 168)
+        XCTAssertGreaterThanOrEqual(pixels.height, 195)
+        XCTAssertLessThan(pixels.height, 2400)
+        XCTAssertTrue(StoredImage.thumbnail(url, filling: CGSize(width: 56, height: 65)) === thumbnail)
+        XCTAssertNil(StoredImage.thumbnail(directory.appendingPathComponent("missing.jpg"), filling: CGSize(width: 56, height: 65)))
+        XCTAssertNil(StoredImage.thumbnail(nil, filling: CGSize(width: 56, height: 65)))
+    }
+
     func testEXIFOrientationIsAppliedToStoredImage() throws {
         let pixels = try XCTUnwrap(image(width: 640, height: 320).cgImage)
         let data = NSMutableData()

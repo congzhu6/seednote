@@ -9,12 +9,16 @@ import AVFoundation
     @Published var session: EditorSession?
     @Published var errorMessage: String?
     @Published var notice: String?
+    /// Saved files that could not be read. They are kept on disk and shown to the user.
+    @Published private(set) var unreadableFiles: [String] = []
     @Published private(set) var saveGeneration = 0
     private(set) var store: NoteStore?
     let captureTracker: CaptureSetupTracker
+    private var pendingCaptureTrace: (draftID: UUID, interval: PerfTrace.Interval)?
 
     init() {
         captureTracker = .shared
+        ExportArchive.removeAll()
         do {
             let fm = FileManager.default
             let base = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -38,10 +42,10 @@ import AVFoundation
 
     func reload() throws {
         guard let store else { throw CaptureError.message(L("The local library is unavailable. Restart Seednote and try again.", "本地资料库无法访问，请重启 Seednote 后重试。")) }
-        let updatedNotes = try store.list()
-        let updatedDrafts = try store.pendingDrafts()
-        notes = updatedNotes
-        drafts = updatedDrafts
+        let library = try store.library()
+        notes = library.notes
+        drafts = library.drafts
+        unreadableFiles = library.unreadableFiles
     }
 
     func create() {
@@ -86,12 +90,19 @@ import AVFoundation
         guard session?.id != draft.id else { return }
         do { try store?.cancel(draft); try reload() } catch { errorMessage = error.localizedDescription }
     }
-    func receive(imageData: Data?, sourceURL: String?, sourceText: String?, origin: String) throws {
+    func receive(imageData: Data?, sourceURL: String?, sourceText: String?, origin: String, trace: PerfTrace.Interval) async throws {
+        var traceOutcome = "failed"
+        defer { if traceOutcome != "handed off" { PerfTrace.end(trace, outcome: traceOutcome) } }
         guard let store else { throw CaptureError.message(L("Seednote cannot access its library.", "Seednote 无法访问资料库。")) }
         if let sourceURL, validWebURL(sourceURL) == nil { throw CaptureError.message(L("Use a complete http or https link.", "请使用完整的 http 或 https 链接。")) }
         if (sourceText?.count ?? 0) > 100_000 { throw CaptureError.message(L("This text exceeds 100,000 characters.", "文字超过 100,000 字符。")) }
         guard imageData != nil || sourceURL != nil || !(sourceText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CaptureError.message(L("No material was provided.", "没有收到素材。")) }
-        let preparedImage = try imageData.map(ImageService.prepare)
+        // Decoding and re-encoding a full screenshot is the slowest step before the editor
+        // can appear, so it runs off the main actor (PRD 7.1 shortcut response target).
+        var preparedImage: Data?
+        if let imageData {
+            preparedImage = try await Task.detached(priority: .userInitiated) { try ImageService.prepare(imageData) }.value
+        }
         var draft = try store.createDraft()
         do {
             draft.note.origin = origin
@@ -101,8 +112,21 @@ import AVFoundation
             try store.saveDraft(draft)
         } catch { try? store.cancel(draft); throw error }
         try reload()
-        if session == nil { open(draft) }
-        else { notice = L("New material is waiting in your drafts.", "新素材已保存在草稿中。") }
+        if session == nil {
+            open(draft)
+            if session?.id == draft.id {
+                pendingCaptureTrace = (draft.id, trace)
+                traceOutcome = "handed off"
+            }
+        } else {
+            notice = L("New material is waiting in your drafts.", "新素材已保存在草稿中。")
+            traceOutcome = "queued as draft"
+        }
+    }
+    func editorDidAppear(_ draftID: UUID) {
+        guard let pending = pendingCaptureTrace, pending.draftID == draftID else { return }
+        pendingCaptureTrace = nil
+        PerfTrace.end(pending.interval, outcome: "editor shown")
     }
 }
 
@@ -136,10 +160,15 @@ import AVFoundation
     private var pendingAudio: (URL, TimeInterval)?
     private var pendingAudioRequiresReview = false
     private var disposables = Set<AnyCancellable>()
+    private var resolvedAssets: [String: URL] = [:]
 
     init(draft: NoteDraft, store: NoteStore, model: AppModel) {
         id = draft.id; self.draft = draft; self.store = store; self.model = model
-        recorder.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &disposables)
+        // Duration and level change ten times a second while recording; only the meter
+        // views observe those. The editor itself redraws on state changes alone.
+        recorder.$isRecording.removeDuplicates().map { _ in () }
+            .merge(with: recorder.$stopNotice.map { _ in () }, recorder.$errorMessage.map { _ in () })
+            .sink { [weak self] in self?.objectWillChange.send() }.store(in: &disposables)
         player.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &disposables)
         recorder.onFinished = { [weak self] url, duration in self?.finishAudio(url, duration: duration) }
         recorder.onFailed = { [weak self] url, duration, message in
@@ -177,9 +206,14 @@ import AVFoundation
         persistenceTask?.cancel(); persistenceTask = nil
         try store.saveDraft(draft); draftKept = true
     }
+    /// Called several times per redraw, so resolved locations are remembered. Attachment
+    /// names are unique and never reused, and staged files live until the draft ends.
     func asset(_ name: String?) -> URL? {
         guard let name else { return nil }
-        return try? store.draftAssetURL(draft, name: name)
+        if let url = resolvedAssets[name] { return url }
+        guard let url = try? store.draftAssetURL(draft, name: name) else { return nil }
+        resolvedAssets[name] = url
+        return url
     }
     func importImage(_ data: Data) async {
         guard !invalidated else { return }
@@ -342,7 +376,9 @@ import AVFoundation
     func save() {
         guard !isSaving, !isImporting, !isStartingRecording else { return }
         isSaving = true
-        defer { isSaving = false }
+        let trace = PerfTrace.begin("Save", "Save")
+        var traceOutcome = "not saved"
+        defer { isSaving = false; PerfTrace.end(trace, outcome: traceOutcome) }
         guard stopRecording() else { return }
         do {
             try attachPendingAudio()
@@ -352,6 +388,7 @@ import AVFoundation
             model?.captureTracker.recordSaved(saved)
             invalidate()
             model?.closeSaved()
+            traceOutcome = "saved"
         } catch {
             if let storeError = error as? NoteStoreError, draft.baseRevision != nil,
                storeError == .conflict || storeError == .notFound { canSaveAsNew = true }

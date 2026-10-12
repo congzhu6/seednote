@@ -49,6 +49,17 @@ struct LibraryView: View {
                             }.padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
                         }.buttonStyle(.plain).accessibilityIdentifier("reviewDrafts")
                     }
+                    if !model.unreadableFiles.isEmpty {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle")
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L("\(model.unreadableFiles.count) saved file(s) couldn't be read", "有 \(model.unreadableFiles.count) 个已保存文件无法读取")).font(.subheadline.weight(.medium))
+                                Text(L("They were kept unchanged, not deleted. Your other ideas are shown below.", "这些文件已原样保留，没有删除。其他灵感照常显示在下方。")).font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer(minLength: 0)
+                        }.padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
+                            .accessibilityElement(children: .combine).accessibilityIdentifier("unreadableFiles")
+                    }
                     if filtered.isEmpty {
                         VStack(alignment: .leading, spacing: 18) {
                             Text(search.isEmpty ? L("Your next idea\nstarts here.", "下一个想法，\n从这里留下。") : L("No matching ideas", "没有找到相关灵感"))
@@ -70,6 +81,7 @@ struct LibraryView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.paper).foregroundStyle(Theme.ink)
+            .noticeBanner($model.notice)
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) {
                 Button { model.create() } label: { Label(L("New idea", "记录灵感"), systemImage: "plus").padding(.horizontal, 12) }
@@ -110,9 +122,10 @@ struct LibraryNoteRow: View {
     @ScaledMetric(relativeTo: .title2) private var titleSize: CGFloat = 23
     var body: some View {
         VStack(alignment: .leading, spacing: 17) {
-            Text(note.thought.isEmpty ? (note.transcript.isEmpty ? L("Add your thought", "添加你的想法") : note.transcript) : note.thought)
+            // PRD 5.3: thought first, then transcript; source-only records say so plainly.
+            Text(note.thought.isEmpty ? (note.transcript.isEmpty ? L("Add your thought", "待补充想法") : note.transcript) : note.thought)
                 .font(.system(size: titleSize, weight: .regular)).tracking(-0.4).lineSpacing(4).lineLimit(4).multilineTextAlignment(.leading)
-            if let name = note.imageName, let url = try? store?.assetURL(noteID: note.id, name: name), let image = UIImage(contentsOfFile: url.path) {
+            if let name = note.imageName, let image = StoredImage.thumbnail(store?.existingAssetURL(for: note, name: name), filling: CGSize(width: 400, height: 158)) {
                 Image(uiImage: image).resizable().scaledToFill().frame(height: 158).frame(maxWidth: .infinity).clipped().clipShape(RoundedRectangle(cornerRadius: 12)).accessibilityLabel(L("Saved source image", "已保存的素材图片"))
             } else if !note.sourceText.isEmpty {
                 Text(note.sourceText).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading).padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 2) }
