@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "仅在你点击录音时记录想法，原始录音保存在 Seednote 的本地资料库。";
+"NSSpeechRecognitionUsageDescription" = "设备支持时，使用本机识别将录音转成可编辑文字。Seednote 不使用云端转写。";
