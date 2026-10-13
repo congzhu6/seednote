@@ -10,6 +10,19 @@ Seednote 是一个本地运行的 iPhone 灵感记录原型，最低支持 iOS 1
 
 工程不依赖第三方包。`Resources/Shortcuts/` 包含应用内交付的两份签名快捷指令；`Shortcuts/source/` 保留对应的未签名工作流源文件。快捷指令依赖 bundle ID `com.seednote.app`，修改 ID 后需要重新制作和签名。
 
+## 测量响应时间
+
+PRD 7.1 的两项耗时由 App 自己记录，只记时间和入口类型，不记内容：
+
+- `Screenshot capture → editor` / `Shared material → editor`：从快捷指令动作开始到记录页出现。日志同时给出距进程启动的毫秒数；数值接近总耗时说明是冷启动，远大于总耗时说明是热启动。
+- `Save`：从点保存到回到灵感库。
+
+真机连接 Mac 后，在“控制台”App 中选中手机，过滤 `subsystem:com.seednote.app category:Performance` 即可逐次读数；也可以在 Instruments 的 Points of Interest 中查看区间。
+
+## 数据格式
+
+每条正式记录是 `notes/<id>.json`，包含 `schemaVersion`。新增字段时让解码使用默认值即可兼容旧记录；只有旧版本无法正确读取的改动才需要提升版本号。读到更高版本或损坏的文件时，App 会原样保留文件、照常显示其他记录，并在灵感库顶部提示无法读取的数量。
+
 ## 目录
 
 - `App/`：SwiftUI 界面、音频与图片服务、App Intents。

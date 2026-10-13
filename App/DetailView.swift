@@ -118,7 +118,7 @@ struct DetailView: View {
     private func sourceSection(_ note: SeedNote) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionCaption(text: L("Source", "来源"))
-            if let image = image(for: note) {
+            if let image = StoredImage.thumbnail(assetURL(note.imageName, of: note), filling: CGSize(width: 58, height: 76)) {
                 Button { showImage = true } label: {
                     HStack(spacing: 14) {
                         Image(uiImage: image).resizable().scaledToFill()
@@ -215,15 +215,17 @@ struct DetailView: View {
         }
     }
 
+    /// Full-resolution image, decoded only when a sheet that shows or shares it opens.
     private func image(for note: SeedNote) -> UIImage? {
-        guard let name = note.imageName, let store = model.store,
-              let url = try? store.assetURL(noteID: note.id, name: name) else { return nil }
-        return UIImage(contentsOfFile: url.path)
+        assetURL(note.imageName, of: note).flatMap { UIImage(contentsOfFile: $0.path) }
     }
 
-    private func audioURL(for note: SeedNote) -> URL? {
-        guard let name = note.audioName, let store = model.store else { return nil }
-        return try? store.assetURL(noteID: note.id, name: name)
+    private func audioURL(for note: SeedNote) -> URL? { assetURL(note.audioName, of: note) }
+
+    // Evaluated during redraws, so it uses the store's lock-free lookup on the loaded record.
+    private func assetURL(_ name: String?, of note: SeedNote) -> URL? {
+        guard let name else { return nil }
+        return model.store?.existingAssetURL(for: note, name: name)
     }
 
     private func play(_ name: String, note: SeedNote) {

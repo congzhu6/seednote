@@ -95,18 +95,16 @@ public final class NoteStore: @unchecked Sendable {
     }
 
     public func pendingDrafts() throws -> [NoteDraft] {
+        try Self.operationLock.withLock { try readDrafts().drafts }
+    }
+
+    /// Loads saved ideas and drafts in one pass. A damaged file is skipped and named in
+    /// `unreadableFiles` instead of failing the whole library; the file itself is kept.
+    public func library() throws -> NoteLibrary {
         try Self.operationLock.withLock {
-            try jsonFiles(in: draftsDirectory).compactMap { path -> NoteDraft? in
-                let draft: NoteDraft
-                do { draft = try read(NoteDraft.self, from: path) }
-                catch { throw NoteStoreError.corruptData(path.lastPathComponent) }
-                if files.fileExists(atPath: noteMetadata(draft.note.id).path),
-                   try record(draft.note.id).committedDraftID == draft.id {
-                    try? cleanupDraft(draft.id)
-                    return nil
-                }
-                return draft
-            }.sorted { $0.note.updatedAt > $1.note.updatedAt }
+            let notes = try readNotes()
+            let drafts = try readDrafts()
+            return NoteLibrary(notes: notes.notes, drafts: drafts.drafts, unreadableFiles: notes.unreadable + drafts.unreadable)
         }
     }
 
@@ -141,6 +139,14 @@ public final class NoteStore: @unchecked Sendable {
             if draft.baseRevision != nil { return try assetURL(noteID: draft.note.id, name: name) }
             throw NoteStoreError.missingMedia(name)
         }
+    }
+
+    /// Lock-free lookup for rendering an already loaded record. Attachment names are
+    /// validated UUID file names and never rewritten, so no metadata read is needed.
+    public func existingAssetURL(for note: SeedNote, name: String) -> URL? {
+        guard note.imageName == name || note.audioName == name, (try? validateFileName(name)) != nil else { return nil }
+        let url = assetsDirectory.appendingPathComponent(note.id.uuidString).appendingPathComponent(name)
+        return files.fileExists(atPath: url.path) ? url : nil
     }
 
     public func assetURL(noteID: UUID, name: String) throws -> URL {
@@ -225,13 +231,9 @@ public final class NoteStore: @unchecked Sendable {
         }
     }
 
+    /// Readable saved ideas, newest first. Use `library()` to learn which files were skipped.
     public func list() throws -> [SeedNote] {
-        try Self.operationLock.withLock {
-            try jsonFiles(in: notesDirectory).map { path in
-                do { return try read(StoredNote.self, from: path).note }
-                catch { throw NoteStoreError.corruptData(path.lastPathComponent) }
-            }.sorted { $0.createdAt > $1.createdAt }
-        }
+        try Self.operationLock.withLock { try readNotes().notes }
     }
 
     public func search(_ text: String) throws -> [SeedNote] {
@@ -252,43 +254,73 @@ public final class NoteStore: @unchecked Sendable {
     }
 
     public func export(to directory: URL, languageCode: String = Locale.preferredLanguages.first ?? "en") throws -> URL {
-        try Self.operationLock.withLock {
-            let notes = try list()
-            try files.createDirectory(at: directory, withIntermediateDirectories: true)
-            let package = directory.appendingPathComponent("Seednote-export-" + UUID().uuidString, isDirectory: true)
-            try files.createDirectory(at: package, withIntermediateDirectories: false)
-            do {
-                func label(_ english: String, _ chinese: String) -> String {
-                    CoreText.choose(english, chinese, languageCode: languageCode)
-                }
-                var index = label("Seednote export", "Seednote 导出资料") + "\n"
-                index += label("\(notes.count) saved \(notes.count == 1 ? "idea" : "ideas")", "共 \(notes.count) 条记录") + "\n\n"
-                for note in notes {
-                    index += "—— \(note.id.uuidString) ——\n\(note.writingCard(languageCode: languageCode))\n"
-                    index += label("Origin: ", "来源：") + note.origin + "\n"
-                    index += label("Created: ", "创建时间：") + CoreText.date(note.createdAt, languageCode: languageCode) + "\n"
-                    for name in [note.imageName, note.audioName].compactMap({ $0 }) {
-                        let source = try assetURL(noteID: note.id, name: name)
-                        let relative = "media/\(note.id.uuidString)/\(name)"
-                        let target = package.appendingPathComponent(relative)
-                        try files.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                        try files.copyItem(at: source, to: target)
-                        index += label("Attachment: ", "附件：") + relative + "\n"
-                    }
-                    index += "\n"
-                }
-                try index.write(to: package.appendingPathComponent("index.txt"), atomically: true, encoding: .utf8)
-                return package
-            } catch {
-                try? files.removeItem(at: package)
-                throw error
+        // Snapshot the records under the lock, then copy media outside it so a large export
+        // never blocks drafting. Committed attachment files are immutable once named.
+        let snapshot = try Self.operationLock.withLock { try readNotes() }
+        let notes = snapshot.notes
+        try files.createDirectory(at: directory, withIntermediateDirectories: true)
+        let package = directory.appendingPathComponent("Seednote-export-" + UUID().uuidString, isDirectory: true)
+        try files.createDirectory(at: package, withIntermediateDirectories: false)
+        do {
+            func label(_ english: String, _ chinese: String) -> String {
+                CoreText.choose(english, chinese, languageCode: languageCode)
             }
+            var index = label("Seednote export", "Seednote 导出资料") + "\n"
+            index += label("\(notes.count) saved \(notes.count == 1 ? "idea" : "ideas")", "共 \(notes.count) 条记录") + "\n"
+            if !snapshot.unreadable.isEmpty {
+                index += label("Unreadable files not exported: ", "无法读取、未导出的文件：") + snapshot.unreadable.joined(separator: ", ") + "\n"
+            }
+            index += "\n"
+            for note in notes {
+                index += "—— \(note.id.uuidString) ——\n\(note.writingCard(languageCode: languageCode))\n"
+                index += label("Origin: ", "来源：") + note.origin + "\n"
+                index += label("Created: ", "创建时间：") + CoreText.date(note.createdAt, languageCode: languageCode) + "\n"
+                for name in [note.imageName, note.audioName].compactMap({ $0 }) {
+                    let relative = "media/\(note.id.uuidString)/\(name)"
+                    let target = package.appendingPathComponent(relative)
+                    // A missing attachment must not block exporting everything else.
+                    if let source = existingAssetURL(for: note, name: name) {
+                        do {
+                            try files.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                            try files.copyItem(at: source, to: target)
+                            index += label("Attachment: ", "附件：") + relative + "\n"
+                            continue
+                        } catch where isMissingFileError(error) {}
+                    }
+                    index += label("Attachment unavailable: ", "附件不可用：") + name + "\n"
+                }
+                index += "\n"
+            }
+            try index.write(to: package.appendingPathComponent("index.txt"), atomically: true, encoding: .utf8)
+            return package
+        } catch {
+            try? files.removeItem(at: package)
+            throw error
         }
     }
 
     private struct StoredNote: Codable {
+        /// Bump when a change cannot be read by older builds; they then report the
+        /// record as unreadable instead of misreading or overwriting it.
+        static let currentSchemaVersion = 1
+
+        let schemaVersion: Int
         let note: SeedNote
         let committedDraftID: UUID
+
+        init(note: SeedNote, committedDraftID: UUID) {
+            schemaVersion = Self.currentSchemaVersion
+            self.note = note
+            self.committedDraftID = committedDraftID
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // Records written before versioning have no key and are version 1.
+            schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+            note = try container.decode(SeedNote.self, forKey: .note)
+            committedDraftID = try container.decode(UUID.self, forKey: .committedDraftID)
+        }
     }
 
     private var notesDirectory: URL { root.appendingPathComponent("notes", isDirectory: true) }
@@ -315,11 +347,58 @@ public final class NoteStore: @unchecked Sendable {
     private func record(_ id: UUID) throws -> StoredNote {
         let path = noteMetadata(id)
         guard files.fileExists(atPath: path.path) else { throw NoteStoreError.notFound }
+        return try record(at: path, expectedID: id)
+    }
+
+    private struct VersionProbe: Decodable { let schemaVersion: Int? }
+
+    private func record(at path: URL, expectedID: UUID) throws -> StoredNote {
+        let data: Data
+        do { data = try Data(contentsOf: path) } catch { throw NoteStoreError.corruptData(path.lastPathComponent) }
+        // Check the version before the full decode so a newer layout is never misreported as damage.
+        if let probe = try? JSONDecoder().decode(VersionProbe.self, from: data),
+           (probe.schemaVersion ?? 1) > StoredNote.currentSchemaVersion {
+            throw NoteStoreError.newerFormat(path.lastPathComponent)
+        }
         do {
-            let stored = try read(StoredNote.self, from: path)
-            guard stored.note.id == id else { throw NoteStoreError.corruptData(path.lastPathComponent) }
+            let stored = try JSONDecoder().decode(StoredNote.self, from: data)
+            guard stored.note.id == expectedID else { throw NoteStoreError.corruptData(path.lastPathComponent) }
             return stored
         } catch { throw NoteStoreError.corruptData(path.lastPathComponent) }
+    }
+
+    private func readNotes() throws -> (notes: [SeedNote], unreadable: [String]) {
+        var notes: [SeedNote] = []
+        var unreadable: [String] = []
+        for path in try jsonFiles(in: notesDirectory) {
+            guard let id = UUID(uuidString: path.deletingPathExtension().lastPathComponent),
+                  let stored = try? record(at: path, expectedID: id) else {
+                unreadable.append(path.lastPathComponent)
+                continue
+            }
+            notes.append(stored.note)
+        }
+        return (notes.sorted { $0.createdAt > $1.createdAt }, unreadable.sorted())
+    }
+
+    private func readDrafts() throws -> (drafts: [NoteDraft], unreadable: [String]) {
+        var drafts: [NoteDraft] = []
+        var unreadable: [String] = []
+        for path in try jsonFiles(in: draftsDirectory) {
+            guard let draft = try? read(NoteDraft.self, from: path) else {
+                unreadable.append(path.lastPathComponent)
+                continue
+            }
+            // A draft whose commit already landed is finished; a damaged record cannot
+            // prove that, so the draft stays recoverable.
+            if files.fileExists(atPath: noteMetadata(draft.note.id).path),
+               (try? record(draft.note.id))?.committedDraftID == draft.id {
+                try? cleanupDraft(draft.id)
+                continue
+            }
+            drafts.append(draft)
+        }
+        return (drafts.sorted { $0.note.updatedAt > $1.note.updatedAt }, unreadable.sorted())
     }
 
     private func jsonFiles(in directory: URL) throws -> [URL] {

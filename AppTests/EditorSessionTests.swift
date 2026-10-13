@@ -254,6 +254,40 @@ import UIKit
         XCTAssertFalse(session.isRecognizing)
     }
 
+    func testCapturedScreenshotOpensEditorAndSecondCaptureWaitsWithVisibleNotice() async throws {
+        let screenshot = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 300, height: 600)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 600))
+        }.pngData())
+        try await model.receive(imageData: screenshot, sourceURL: nil, sourceText: nil, origin: "shortcutScreenshot",
+                                trace: PerfTrace.begin("Capture", "test capture"))
+        let first = try XCTUnwrap(model.session)
+        XCTAssertEqual(first.draft.note.origin, "shortcutScreenshot")
+        let imageName = try XCTUnwrap(first.draft.note.imageName)
+        XCTAssertTrue(imageName.hasSuffix(".jpg"))
+        XCTAssertNotNil(first.asset(imageName))
+        XCTAssertNil(model.notice)
+        model.editorDidAppear(first.id)
+
+        try await model.receive(imageData: nil, sourceURL: "https://example.org/next", sourceText: nil, origin: "shortcutShare",
+                                trace: PerfTrace.begin("Capture", "test capture"))
+        XCTAssertEqual(model.session?.id, first.id, "A second capture must not replace the open draft")
+        XCTAssertNotNil(model.notice)
+        XCTAssertTrue(model.drafts.contains { $0.note.sourceURL == "https://example.org/next" })
+    }
+
+    func testUnreadableRecordIsSurfacedWhileOtherIdeasStillLoad() throws {
+        var draft = try store.createDraft()
+        draft.note.thought = "Readable idea"
+        let saved = try store.commit(draft)
+        let broken = root.appendingPathComponent("notes/\(UUID().uuidString).json")
+        try Data("{".utf8).write(to: broken)
+
+        try model.reload()
+        XCTAssertEqual(model.notes.map(\.id), [saved.id])
+        XCTAssertEqual(model.unreadableFiles, [broken.lastPathComponent])
+        XCTAssertNil(model.errorMessage)
+    }
+
     // A real PCM WAV fixture; no microphone or permission prompt is involved.
     private func playableWAV() -> Data {
         var result = Data()

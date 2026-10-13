@@ -179,8 +179,9 @@ struct SettingsView: View {
                     throw CaptureError.message(L("The local library is unavailable.", "本地资料库无法访问。"))
                 }
                 let archive = try await Task.detached(priority: .userInitiated) {
-                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SeednoteExports", isDirectory: true)
-                    let folder = try store.export(to: directory)
+                    // Each archive is a full copy of the library; keep only the newest.
+                    ExportArchive.removeAll()
+                    let folder = try store.export(to: ExportArchive.directory)
                     return try ExportArchive.make(from: folder)
                 }.value
                 share = SharePayload(items: [archive])
@@ -340,7 +341,15 @@ private struct PermissionSheet: View {
 }
 
 // Creates a local ZIP snapshot; this API does not initiate any network upload.
-private enum ExportArchive {
+enum ExportArchive {
+    static let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SeednoteExports", isDirectory: true)
+
+    /// Archives are not removed when the share sheet closes: a destination such as
+    /// Save to Files may still be copying. They are cleared at the next export and at launch.
+    static func removeAll() {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     static func make(from folder: URL) throws -> URL {
         let destination = folder.appendingPathExtension("zip")
         let coordinator = NSFileCoordinator()

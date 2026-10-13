@@ -54,6 +54,27 @@ public struct SeedNote: Codable, Equatable, Identifiable, Sendable {
         self.ocrStatus = ocrStatus
     }
 
+    // Records outlive app versions. Only the identity is required; every other field
+    // falls back to its default so data written before a field existed still loads.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(timeIntervalSinceReferenceDate: 0)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL) ?? ""
+        sourceText = try container.decodeIfPresent(String.self, forKey: .sourceText) ?? ""
+        thought = try container.decodeIfPresent(String.self, forKey: .thought) ?? ""
+        transcript = try container.decodeIfPresent(String.self, forKey: .transcript) ?? ""
+        ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText) ?? ""
+        imageName = try container.decodeIfPresent(String.self, forKey: .imageName)
+        audioName = try container.decodeIfPresent(String.self, forKey: .audioName)
+        audioDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .audioDuration) ?? 0
+        origin = try container.decodeIfPresent(String.self, forKey: .origin) ?? ""
+        transcriptStatus = try container.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? ""
+        ocrStatus = try container.decodeIfPresent(String.self, forKey: .ocrStatus) ?? ""
+    }
+
     public var hasContent: Bool {
         [sourceURL, sourceText, thought, transcript, ocrText].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             || imageName != nil || audioName != nil
@@ -101,12 +122,21 @@ public struct NoteDraft: Codable, Identifiable, Sendable {
 
 public enum AttachmentKind: Sendable { case image, audio }
 
+/// Everything the store could read, plus the files it could not. Unreadable files are
+/// reported and left untouched so one damaged record never hides the rest of the library.
+public struct NoteLibrary: Sendable {
+    public var notes: [SeedNote]
+    public var drafts: [NoteDraft]
+    public var unreadableFiles: [String]
+}
+
 public enum NoteStoreError: Error, Equatable, LocalizedError {
     case notFound
     case conflict
     case invalidInput(String)
     case missingMedia(String)
     case corruptData(String)
+    case newerFormat(String)
 
     public var errorDescription: String? { message(languageCode: CoreText.preferredLanguage) }
 
@@ -132,6 +162,7 @@ public enum NoteStoreError: Error, Equatable, LocalizedError {
             return label("Invalid input: ", "输入不符合要求：") + detail
         case .missingMedia(let name): return label("Attachment unavailable: ", "附件不可用：") + name
         case .corruptData(let name): return label("Could not read saved data: ", "资料无法读取：") + name
+        case .newerFormat(let name): return label("Saved by a newer Seednote version. Update the app to open: ", "该资料由更新版本的 Seednote 保存，请更新 App 后打开：") + name
         }
     }
 }

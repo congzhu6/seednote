@@ -433,11 +433,98 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.commit(draft))
     }
 
-    func testCorruptMetadataIsAnErrorInsteadOfAnEmptyLibrary() throws {
+    func testCorruptMetadataIsReportedWithoutHidingReadableRecords() throws {
         let (root, store) = try fixture()
-        let notes = root.appendingPathComponent("notes", isDirectory: true)
-        try Data("not json".utf8).write(to: notes.appendingPathComponent(UUID().uuidString + ".json"))
-        XCTAssertThrowsError(try store.list())
+        var draft = try store.createDraft()
+        draft.note.thought = "Still readable"
+        let saved = try store.commit(draft)
+        var pending = try store.createDraft()
+        pending.note.thought = "Pending draft"
+        try store.saveDraft(pending)
+
+        let brokenNote = root.appendingPathComponent("notes/\(UUID().uuidString).json")
+        let brokenDraft = root.appendingPathComponent("drafts/\(UUID().uuidString).json")
+        try Data("not json".utf8).write(to: brokenNote)
+        try Data("not json".utf8).write(to: brokenDraft)
+
+        XCTAssertEqual(try store.list().map(\.id), [saved.id])
+        XCTAssertEqual(try store.pendingDrafts().map(\.id), [pending.id])
+        let library = try store.library()
+        XCTAssertEqual(library.notes.map(\.id), [saved.id])
+        XCTAssertEqual(library.drafts.map(\.id), [pending.id])
+        XCTAssertEqual(Set(library.unreadableFiles), [brokenNote.lastPathComponent, brokenDraft.lastPathComponent])
+        // Damaged files are reported, never deleted or rewritten.
+        XCTAssertEqual(try Data(contentsOf: brokenNote), Data("not json".utf8))
+        XCTAssertEqual(try Data(contentsOf: brokenDraft), Data("not json".utf8))
+    }
+
+    func testRecordsWrittenBeforeNewerFieldsStillLoad() throws {
+        let (root, store) = try fixture()
+        var draft = try store.createDraft()
+        draft.note.thought = "Written by an early build"
+        let saved = try store.commit(draft)
+        let path = root.appendingPathComponent("notes/\(saved.id.uuidString).json")
+        var stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        var note = try XCTUnwrap(stored["note"] as? [String: Any])
+        for key in ["origin", "transcriptStatus", "ocrStatus", "ocrText", "audioDuration"] { note.removeValue(forKey: key) }
+        stored["note"] = note
+        stored.removeValue(forKey: "schemaVersion")
+        try JSONSerialization.data(withJSONObject: stored).write(to: path)
+
+        let loaded = try XCTUnwrap(store.list().single)
+        XCTAssertEqual(loaded.id, saved.id)
+        XCTAssertEqual(loaded.thought, "Written by an early build")
+        XCTAssertEqual(loaded.ocrStatus, "")
+        XCTAssertEqual(loaded.audioDuration, 0)
+        XCTAssertTrue(try store.library().unreadableFiles.isEmpty)
+        // Editing and saving again upgrades the record in place.
+        var edit = try store.editDraft(noteID: saved.id)
+        edit.note.thought = "Edited later"
+        XCTAssertEqual(try store.commit(edit).revision, 2)
+    }
+
+    func testRecordFromNewerSchemaIsReportedAndNeverOverwritten() throws {
+        let (root, store) = try fixture()
+        var draft = try store.createDraft()
+        draft.note.thought = "From the future"
+        let saved = try store.commit(draft)
+        let path = root.appendingPathComponent("notes/\(saved.id.uuidString).json")
+        var stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        stored["schemaVersion"] = 99
+        let newer = try JSONSerialization.data(withJSONObject: stored)
+        try newer.write(to: path)
+
+        XCTAssertTrue(try store.list().isEmpty)
+        XCTAssertEqual(try store.library().unreadableFiles, [path.lastPathComponent])
+        XCTAssertThrowsError(try store.editDraft(noteID: saved.id)) { error in
+            XCTAssertEqual(error as? NoteStoreError, .newerFormat(path.lastPathComponent))
+        }
+        XCTAssertEqual(try Data(contentsOf: path), newer)
+    }
+
+    func testExportSkipsMissingAttachmentAndNamesUnreadableFiles() throws {
+        let (root, store) = try fixture()
+        var lost = try store.createDraft()
+        lost.note.thought = "Image went missing"
+        try store.attach(Data("image".utf8), fileExtension: "jpg", to: &lost, kind: .image)
+        let lostNote = try store.commit(lost)
+        var kept = try store.createDraft()
+        kept.note.thought = "Audio is fine"
+        try store.attach(Data("voice".utf8), fileExtension: "m4a", to: &kept, kind: .audio)
+        let keptNote = try store.commit(kept)
+        let imageName = try XCTUnwrap(lostNote.imageName)
+        try FileManager.default.removeItem(at: store.assetURL(noteID: lostNote.id, name: imageName))
+        let broken = UUID().uuidString + ".json"
+        try Data("not json".utf8).write(to: root.appendingPathComponent("notes/\(broken)"))
+
+        let package = try store.export(to: root.appendingPathComponent("exports"), languageCode: "en-US")
+        let index = try String(contentsOf: package.appendingPathComponent("index.txt"), encoding: .utf8)
+        XCTAssertTrue(index.contains("2 saved ideas"))
+        XCTAssertTrue(index.contains("Image went missing"))
+        XCTAssertTrue(index.contains("Attachment unavailable: \(imageName)"))
+        XCTAssertTrue(index.contains("Unreadable files not exported: \(broken)"))
+        let audio = package.appendingPathComponent("media/\(keptNote.id.uuidString)/\(try XCTUnwrap(keptNote.audioName))")
+        XCTAssertEqual(try Data(contentsOf: audio), Data("voice".utf8))
     }
 
     func testCommitReportsCorruptExistingRecordWithoutOverwritingIt() throws {
