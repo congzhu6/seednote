@@ -253,7 +253,7 @@ public final class NoteStore: @unchecked Sendable {
         }
     }
 
-    public func export(to directory: URL, languageCode: String = Locale.preferredLanguages.first ?? "en") throws -> URL {
+    public func export(to directory: URL, languageCode: String = Bundle.main.preferredLocalizations.first ?? "en") throws -> URL {
         // Snapshot the records under the lock, then copy media outside it so a large export
         // never blocks drafting. Committed attachment files are immutable once named.
         let snapshot = try Self.operationLock.withLock { try readNotes() }
@@ -432,12 +432,8 @@ public final class NoteStore: @unchecked Sendable {
         for text in [note.sourceText, note.thought, note.transcript, note.ocrText] {
             guard text.count <= 100_000 else { throw NoteStoreError.invalidInput("textLength") }
         }
-        if !note.sourceURL.isEmpty {
-            guard note.sourceURL.count <= 10_000, let url = URLComponents(string: note.sourceURL),
-                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-                  let host = url.host, !host.isEmpty, url.user == nil, url.password == nil else {
-                throw NoteStoreError.invalidInput("webURL")
-            }
+        if !note.sourceURL.isEmpty, WebLink.url(from: note.sourceURL) == nil {
+            throw NoteStoreError.invalidInput("webURL")
         }
         for name in [note.imageName, note.audioName].compactMap({ $0 }) { try validateFileName(name) }
         guard note.audioDuration.isFinite, (0...180).contains(note.audioDuration) else {

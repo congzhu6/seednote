@@ -1,7 +1,9 @@
 import Foundation
 
 enum CoreText {
-    static var preferredLanguage: String { Locale.preferredLanguages.first ?? "en" }
+    // The localization the system resolved for this app (en or zh-Hans), so text matches the
+    // permission prompts and the per-app language chosen in iPhone Settings.
+    static var preferredLanguage: String { Bundle.main.preferredLocalizations.first ?? "en" }
     static func choose(_ english: String, _ chinese: String, languageCode: String) -> String {
         languageCode.lowercased().hasPrefix("zh") ? chinese : english
     }
@@ -11,6 +13,27 @@ enum CoreText {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: value)
+    }
+}
+
+/// Progress of on-device transcription or image text recognition. Stored in records as
+/// its raw string, so existing JSON is unchanged.
+public enum RecognitionStatus: String, Sendable {
+    case notStarted = ""
+    case processing, complete, interrupted, unavailable
+
+    /// The last attempt stopped without a result; the user can retry.
+    public var didNotFinish: Bool { self == .interrupted || self == .unavailable }
+}
+
+/// The single rule for a saved source link: HTTP(S), a host, and no embedded credentials.
+public enum WebLink {
+    public static func url(from string: String) -> URL? {
+        guard string.count <= 10_000, let components = URLComponents(string: string),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil else { return nil }
+        return components.url
     }
 }
 
@@ -73,6 +96,16 @@ public struct SeedNote: Codable, Equatable, Identifiable, Sendable {
         origin = try container.decodeIfPresent(String.self, forKey: .origin) ?? ""
         transcriptStatus = try container.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? ""
         ocrStatus = try container.decodeIfPresent(String.self, forKey: .ocrStatus) ?? ""
+    }
+
+    public var transcriptState: RecognitionStatus {
+        get { RecognitionStatus(rawValue: transcriptStatus) ?? .notStarted }
+        set { transcriptStatus = newValue.rawValue }
+    }
+
+    public var ocrState: RecognitionStatus {
+        get { RecognitionStatus(rawValue: ocrStatus) ?? .notStarted }
+        set { ocrStatus = newValue.rawValue }
     }
 
     public var hasContent: Bool {

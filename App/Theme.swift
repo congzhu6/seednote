@@ -1,8 +1,10 @@
 import SwiftUI
 import UIKit
 
+/// Picks the string for the localization the system resolved for this app (en or zh-Hans),
+/// matching InfoPlist.strings permission prompts and the per-app language in iPhone Settings.
 func L(_ english: String, _ chinese: String) -> String {
-    Locale.preferredLanguages.first?.hasPrefix("zh") == true ? chinese : english
+    Bundle.main.preferredLocalizations.first?.hasPrefix("zh") == true ? chinese : english
 }
 
 enum Theme {
@@ -94,11 +96,9 @@ extension TimeInterval {
     var clockText: String { String(format: "%02d:%02d", max(0, Int(self)) / 60, max(0, Int(self)) % 60) }
 }
 
+/// Same rule the store enforces on save, so a link accepted here is never rejected later.
 func validWebURL(_ string: String) -> URL? {
-    guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
-          ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-          let host = url.host, !host.isEmpty else { return nil }
-    return url
+    WebLink.url(from: string.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 enum CaptureError: LocalizedError {

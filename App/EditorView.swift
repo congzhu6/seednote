@@ -48,7 +48,7 @@ struct EditorView: View {
                             else { Text(session.draft.note.ocrText).font(.subheadline).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8) }
                         }.font(.subheadline).foregroundStyle(Theme.muted)
                     }
-                    if session.draft.note.ocrStatus == "interrupted" || session.draft.note.ocrStatus == "unavailable" {
+                    if session.draft.note.ocrState.didNotFinish {
                         Text(L("Image recognition did not finish. Your text is kept. Retry from Image options when the image is available.", "图片识别未完成，已有文字仍保留。图片可用时，可从图片操作中重试。"))
                             .font(.caption).foregroundStyle(Theme.muted)
                     }
@@ -214,7 +214,7 @@ struct EditorView: View {
                 SectionCaption(text: L("Transcript · editable", "转写 · 可编辑"))
                 TextEditor(text: Binding(get: { session.draft.note.transcript }, set: { session.change(\.transcript, to: $0) })).font(.body).frame(minHeight: 110).scrollContentBackground(.hidden).accessibilityLabel(L("Transcript", "转写内容"))
             }
-            if session.draft.note.transcriptStatus == "interrupted" || session.draft.note.transcriptStatus == "unavailable" {
+            if session.draft.note.transcriptState.didNotFinish {
                 Text(L("Transcription did not finish. Your existing text is kept. You can retry when the recording and on-device language support are available.", "转写未完成，已有文字仍保留。录音和本机语言支持可用时，可以重试。"))
                     .font(.caption).foregroundStyle(Theme.muted)
             } else if session.asset(session.draft.note.audioName) != nil {

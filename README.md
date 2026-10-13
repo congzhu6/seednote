@@ -8,6 +8,8 @@ Seednote 是一个本地运行的 iPhone 灵感记录原型，最低支持 iOS 1
 2. 真机运行前，在 Xcode 的 Signing & Capabilities 中选择自己的开发团队；也可以运行 `python3 Tools/generate_project.py --development-team YOUR_TEAM_ID`。
 3. `swift test --disable-sandbox` 运行 Core 文件存储测试。iOS 界面测试在 Xcode 的 **Seednote** scheme 中运行。
 
+上传 TestFlight 或 App Store 前运行 `python3 Tools/bump_build.py` 递增构建号（加 `--version 0.2.0` 同时改版本号），然后在 Xcode 中 Product → Archive。App 图标来自 `Resources/Assets.xcassets` 里不含透明通道的 1024 像素图，由 `swift Tools/generate_icons.swift Resources/Assets.xcassets/AppIcon.appiconset` 生成。
+
 工程不依赖第三方包。`Resources/Shortcuts/` 包含应用内交付的两份签名快捷指令；`Shortcuts/source/` 保留对应的未签名工作流源文件。快捷指令依赖 bundle ID `com.seednote.app`，修改 ID 后需要重新制作和签名。
 
 ## 测量响应时间

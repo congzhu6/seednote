@@ -12,12 +12,11 @@ enum ImageService {
         case tooLarge, tooManyPixels, invalidImage, encodeFailed
 
         var errorDescription: String? {
-            let chinese = Locale.current.language.languageCode?.identifier == "zh"
             switch self {
-            case .tooLarge: return chinese ? "图片超过 20 MB，请选择较小的图片。" : "This image exceeds 20 MB. Choose a smaller image."
-            case .tooManyPixels: return chinese ? "图片超过 4000 万像素，请选择较小的图片。" : "This image exceeds 40 megapixels. Choose a smaller image."
-            case .invalidImage: return chinese ? "无法读取这张图片。" : "This image could not be read."
-            case .encodeFailed: return chinese ? "无法处理这张图片。" : "This image could not be prepared."
+            case .tooLarge: return L("This image exceeds 20 MB. Choose a smaller image.", "图片超过 20 MB，请选择较小的图片。")
+            case .tooManyPixels: return L("This image exceeds 40 megapixels. Choose a smaller image.", "图片超过 4000 万像素，请选择较小的图片。")
+            case .invalidImage: return L("This image could not be read.", "无法读取这张图片。")
+            case .encodeFailed: return L("This image could not be prepared.", "无法处理这张图片。")
             }
         }
     }

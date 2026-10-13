@@ -458,6 +458,35 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: brokenDraft), Data("not json".utf8))
     }
 
+    func testWebLinkIsTheSingleRuleForSavedLinks() throws {
+        XCTAssertNotNil(WebLink.url(from: "https://example.org/a?b=1"))
+        XCTAssertNotNil(WebLink.url(from: "HTTP://example.org"))
+        for rejected in ["javascript:alert(1)", "ftp://example.org", "https://", "example.org",
+                         "https://user:secret@example.org", " https://example.org"] {
+            XCTAssertNil(WebLink.url(from: rejected), rejected)
+        }
+        let (_, store) = try fixture()
+        var draft = try store.createDraft()
+        draft.note.thought = "Link with credentials"
+        draft.note.sourceURL = "https://user:secret@example.org"
+        XCTAssertThrowsError(try store.saveDraft(draft)) { error in
+            XCTAssertEqual(error as? NoteStoreError, .invalidInput("webURL"))
+        }
+    }
+
+    func testRecognitionStatusKeepsTheStoredStrings() {
+        var note = SeedNote()
+        XCTAssertEqual(note.transcriptState, .notStarted)
+        note.transcriptState = .interrupted
+        note.ocrState = .complete
+        XCTAssertEqual(note.transcriptStatus, "interrupted")
+        XCTAssertEqual(note.ocrStatus, "complete")
+        XCTAssertTrue(note.transcriptState.didNotFinish)
+        XCTAssertFalse(note.ocrState.didNotFinish)
+        note.ocrStatus = "unavailable"
+        XCTAssertEqual(note.ocrState, .unavailable)
+    }
+
     func testRecordsWrittenBeforeNewerFieldsStillLoad() throws {
         let (root, store) = try fixture()
         var draft = try store.createDraft()

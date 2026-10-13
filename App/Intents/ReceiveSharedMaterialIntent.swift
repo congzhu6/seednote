@@ -34,7 +34,7 @@ struct ReceiveSharedMaterialIntent: AppIntent {
             imageData: imageData,
             sourceURL: url,
             sourceText: selectedText,
-            origin: "shortcutShare",
+            origin: CaptureSetupOrigin.shareShortcut.rawValue,
             trace: trace
         )
         return .result()
