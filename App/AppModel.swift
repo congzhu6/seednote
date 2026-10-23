@@ -111,14 +111,15 @@ import AVFoundation
             if let preparedImage { try store.attach(preparedImage, fileExtension: "jpg", to: &draft, kind: .image) }
             try store.saveDraft(draft)
         } catch { try? store.cancel(draft); throw error }
-        try reload()
         if session == nil {
-            open(draft)
-            if session?.id == draft.id {
-                pendingCaptureTrace = (draft.id, trace)
-                traceOutcome = "handed off"
-            }
+            // The draft was just written, so it opens directly instead of through `open(_:)`,
+            // which would find it again and reread the library (PRD 7.1 shortcut response target).
+            session = EditorSession(draft: draft, store: store, model: self)
+            pendingCaptureTrace = (draft.id, trace)
+            traceOutcome = "handed off"
+            do { try reload() } catch { errorMessage = error.localizedDescription }
         } else {
+            try reload()
             notice = L("New material is waiting in your drafts.", "新素材已保存在草稿中。")
             traceOutcome = "queued as draft"
         }
@@ -229,6 +230,9 @@ import AVFoundation
         } catch { errorMessage = error.localizedDescription }
     }
     func removeImage() {
+        // Text read from an image the user removes no longer has a source. When the file is
+        // already missing, that text is the only copy left of the source, so it stays.
+        if asset(draft.note.imageName) != nil { draft.note.ocrText = "" }
         imageVersion += 1; cancelImageRecognition()
         draft.note.imageName = nil; draft.note.ocrState = .notStarted
         schedulePersistence()
@@ -331,6 +335,7 @@ import AVFoundation
         player.stop(); isTranscribing = true
         let version = transcriptVersion
         let original = draft.note.transcript
+        let duration = draft.note.audioDuration
         draft.note.transcriptState = .processing
         let generation = UUID(); transcriptionGeneration = generation
         do { try flush() } catch { cancelTranscription(); errorMessage = error.localizedDescription; return }
@@ -338,7 +343,7 @@ import AVFoundation
             guard let self else { return }
             defer { if self.transcriptionGeneration == generation { self.isTranscribing = false } }
             do {
-                let text = try await self.transcriber.transcribe(url: url, localeIdentifier: self.speechLocale)
+                let text = try await self.transcriber.transcribe(url: url, localeIdentifier: self.speechLocale, audioDuration: duration)
                 guard !self.invalidated, !Task.isCancelled, self.transcriptionGeneration == generation, self.transcriptVersion == version, self.draft.note.transcript == original else { return }
                 self.draft.note.transcript = text; self.draft.note.transcriptState = .complete
                 try self.flush()

@@ -13,6 +13,8 @@ import SwiftUI
                         }
                         model.session?.stopRecording()
                         do { try model.session?.flush() } catch { model.session?.errorMessage = error.localizedDescription }
+                        // Off the capture path: nobody is waiting on the library while it is in the background.
+                        if let store = model.store { Task.detached(priority: .utility) { try? store.removeOrphanedAssets() } }
                     }
                 }
         }

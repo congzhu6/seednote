@@ -5,7 +5,9 @@ import Vision
 
 enum ImageService {
     private static let maximumBytes = 20 * 1024 * 1024
-    private static let maximumPixels = 40_000_000
+    // Covers the 48-megapixel photos of recent iPhones. PNG and other formats without
+    // subsampled decoding are fully decoded, so the bound stays close to that size.
+    private static let maximumPixels = 50_000_000
     private static let maximumEdge = 2_400
 
     private enum ImageError: LocalizedError {
@@ -14,7 +16,7 @@ enum ImageService {
         var errorDescription: String? {
             switch self {
             case .tooLarge: return L("This image exceeds 20 MB. Choose a smaller image.", "图片超过 20 MB，请选择较小的图片。")
-            case .tooManyPixels: return L("This image exceeds 40 megapixels. Choose a smaller image.", "图片超过 4000 万像素，请选择较小的图片。")
+            case .tooManyPixels: return L("This image exceeds 50 megapixels. Choose a smaller image.", "图片超过 5000 万像素，请选择较小的图片。")
             case .invalidImage: return L("This image could not be read.", "无法读取这张图片。")
             case .encodeFailed: return L("This image could not be prepared.", "无法处理这张图片。")
             }

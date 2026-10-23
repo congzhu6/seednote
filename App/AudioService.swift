@@ -282,7 +282,14 @@ final class LocalTranscriber {
     private var requestID: UUID?
     private var generation = UUID()
 
-    func transcribe(url: URL, localeIdentifier: String) async throws -> String {
+    /// On-device recognition of a long recording can take a while on older iPhones, so the
+    /// wait grows with the audio: twice its length, and never under a minute.
+    static func timeout(forAudioDuration duration: TimeInterval) -> Duration {
+        guard duration.isFinite, duration > 0 else { return .seconds(60) }
+        return .seconds(max(60, duration * 2))
+    }
+
+    func transcribe(url: URL, localeIdentifier: String, audioDuration: TimeInterval) async throws -> String {
         cancel()
         let generation = UUID()
         self.generation = generation
@@ -330,8 +337,9 @@ final class LocalTranscriber {
                         }
                     }
                 }
+                let timeout = Self.timeout(forAudioDuration: audioDuration)
                 timeoutTask = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(60))
+                    try? await Task.sleep(for: timeout)
                     guard !Task.isCancelled else { return }
                     self?.finish(id: id, result: .failure(MediaError.recognitionTimedOut))
                 }
