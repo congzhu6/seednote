@@ -14,7 +14,7 @@ Seednote 是一个本地运行的 iPhone 灵感记录原型，最低支持 iOS 1
 
 ## 测量响应时间
 
-PRD 7.1 的两项耗时由 App 自己记录，只记时间和入口类型，不记内容：
+产品需求见 [docs/PRD.md](docs/PRD.md)。PRD 7.1 的两项耗时由 App 自己记录，只记时间和入口类型，不记内容：
 
 - `Screenshot capture → editor` / `Shared material → editor`：从快捷指令动作开始到记录页出现。日志同时给出距进程启动的毫秒数；数值接近总耗时说明是冷启动，远大于总耗时说明是热启动。
 - `Save`：从点保存到回到灵感库。
@@ -32,5 +32,6 @@ PRD 7.1 的两项耗时由 App 自己记录，只记时间和入口类型，不�
 - `Resources/`：图标、权限文案、隐私清单和内置快捷指令。
 - `Tests/`、`AppTests/`、`UITests/`：存储、应用和界面测试。
 - `Tools/`：Xcode 工程与图标生成脚本。
+- `docs/`：产品需求文档。
 
 这是开发源码快照；签名、真机兼容性和 App Store 发布需要分别验收。
