@@ -1,6 +1,13 @@
 import XCTest
 
+/// Run on the test iPhone: these use the real Files app and a recording made by DeviceAcceptanceTests.
 final class InteractiveMediaTests: XCTestCase {
+    override func setUpWithError() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Files and microphone media acceptance is run on the test iPhone.")
+        #endif
+    }
+
     func testTextOnlyArchiveReachesLocalFilesDestination() {
         continueAfterFailure = false
         let app = XCUIApplication()
