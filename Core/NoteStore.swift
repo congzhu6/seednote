@@ -214,8 +214,9 @@ public final class NoteStore: @unchecked Sendable {
             note.createdAt = old?.note.createdAt ?? Date()
             note.updatedAt = Date()
             try write(StoredNote(note: note, committedDraftID: draft.id), to: noteMetadata(note.id))
-            // Failure after this point is a successful commit. Leave draft cleanup best effort.
+            // Failure after this point is a successful commit. Leave draft and media cleanup best effort.
             try? cleanupDraft(draft.id)
+            if let drafts = try? readDrafts(), drafts.unreadable.isEmpty { pruneAssets(of: note, drafts: drafts.drafts) }
             return note
         }
     }
@@ -250,6 +251,25 @@ public final class NoteStore: @unchecked Sendable {
             // The record is already deleted. A media cleanup failure may leave
             // orphan bytes, but must not report an error the user cannot retry.
             if files.fileExists(atPath: media.path) { try? files.removeItem(at: media) }
+        }
+    }
+
+    /// Reclaims media that no saved idea or draft refers to: folders of records that no longer
+    /// exist and files a later edit replaced. A folder whose record cannot be read is left
+    /// alone, and nothing is removed while a draft is unreadable, since either may refer to it.
+    public func removeOrphanedAssets() throws {
+        try Self.operationLock.withLock {
+            let drafts = try readDrafts()
+            guard drafts.unreadable.isEmpty else { return }
+            for folder in try files.contentsOfDirectory(at: assetsDirectory, includingPropertiesForKeys: nil) {
+                guard let id = UUID(uuidString: folder.lastPathComponent) else { continue }
+                if files.fileExists(atPath: noteMetadata(id).path) {
+                    guard let stored = try? record(id) else { continue }
+                    pruneAssets(of: stored.note, drafts: drafts.drafts)
+                } else if !drafts.drafts.contains(where: { $0.note.id == id }) {
+                    try? files.removeItem(at: folder)
+                }
+            }
         }
     }
 
@@ -335,6 +355,20 @@ public final class NoteStore: @unchecked Sendable {
         if files.fileExists(atPath: metadata.path) { try files.removeItem(at: metadata) }
         let media = stagedDirectory(id)
         if files.fileExists(atPath: media.path) { try files.removeItem(at: media) }
+    }
+
+    /// Removes files in a record's media folder that neither the record nor a draft of it
+    /// references, such as an attachment replaced by an edit or a copy left by an interrupted commit.
+    private func pruneAssets(of note: SeedNote, drafts: [NoteDraft]) {
+        let folder = assetsDirectory.appendingPathComponent(note.id.uuidString)
+        guard let names = try? files.contentsOfDirectory(atPath: folder.path) else { return }
+        var referenced = Set([note.imageName, note.audioName].compactMap { $0 })
+        for draft in drafts where draft.note.id == note.id {
+            referenced.formUnion([draft.note.imageName, draft.note.audioName].compactMap { $0 })
+        }
+        for name in names where !referenced.contains(name) {
+            try? files.removeItem(at: folder.appendingPathComponent(name))
+        }
     }
 
     private func storedDraft(_ id: UUID) throws -> NoteDraft {

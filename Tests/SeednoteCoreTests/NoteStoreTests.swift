@@ -94,6 +94,85 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertThrowsError(try reopened.commit(recovered))
     }
 
+    func testCommittedEditRemovesReplacedAndRemovedAttachments() throws {
+        let (root, store) = try fixture()
+        var draft = try store.createDraft()
+        draft.note.thought = "Replace the media"
+        try store.attach(Data("first image".utf8), fileExtension: "jpg", to: &draft, kind: .image)
+        try store.attach(Data("first audio".utf8), fileExtension: "m4a", to: &draft, kind: .audio)
+        let original = try store.commit(draft)
+        let folder = root.appendingPathComponent("assets/\(original.id.uuidString)")
+
+        var edit = try store.editDraft(noteID: original.id)
+        try store.attach(Data("second audio".utf8), fileExtension: "m4a", to: &edit, kind: .audio)
+        edit.note.imageName = nil
+        try store.saveDraft(edit)
+        let saved = try store.commit(edit)
+
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertEqual(remaining, [try XCTUnwrap(saved.audioName)])
+        XCTAssertEqual(try Data(contentsOf: store.assetURL(noteID: saved.id, name: XCTUnwrap(saved.audioName))), Data("second audio".utf8))
+    }
+
+    func testCommitKeepsAttachmentAnotherDraftOfTheSameIdeaStillReferences() throws {
+        let (root, store) = try fixture()
+        var draft = try store.createDraft()
+        draft.note.thought = "Two edits at once"
+        try store.attach(Data("shared image".utf8), fileExtension: "jpg", to: &draft, kind: .image)
+        let original = try store.commit(draft)
+        let imageName = try XCTUnwrap(original.imageName)
+        // A draft recorded before edits owned their own copies refers to the record's file.
+        let older = NoteDraft(note: original, baseRevision: original.revision)
+        let olderData = try JSONEncoder().encode(older)
+        try olderData.write(to: root.appendingPathComponent("drafts/\(older.id.uuidString).json"))
+
+        var edit = try store.editDraft(noteID: original.id)
+        edit.note.imageName = nil
+        try store.saveDraft(edit)
+        _ = try store.commit(edit)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("assets/\(original.id.uuidString)/\(imageName)").path))
+    }
+
+    func testRemoveOrphanedAssetsKeepsReferencedAndUnreadableMedia() throws {
+        let (root, store) = try fixture()
+        let assets = root.appendingPathComponent("assets")
+        var draft = try store.createDraft()
+        draft.note.thought = "Keep referenced media"
+        try store.attach(Data("kept".utf8), fileExtension: "jpg", to: &draft, kind: .image)
+        let saved = try store.commit(draft)
+        let savedFolder = assets.appendingPathComponent(saved.id.uuidString)
+        // Leftovers from an interrupted copy and a record that no longer exists.
+        try Data("partial".utf8).write(to: savedFolder.appendingPathComponent(UUID().uuidString + ".tmp"))
+        let orphan = assets.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        try Data("orphan".utf8).write(to: orphan.appendingPathComponent(UUID().uuidString + ".jpg"))
+        // A record that cannot be read may still own its folder.
+        let damagedID = UUID()
+        try Data("{".utf8).write(to: root.appendingPathComponent("notes/\(damagedID.uuidString).json"))
+        let damagedFolder = assets.appendingPathComponent(damagedID.uuidString)
+        try FileManager.default.createDirectory(at: damagedFolder, withIntermediateDirectories: true)
+        try Data("unknown".utf8).write(to: damagedFolder.appendingPathComponent(UUID().uuidString + ".jpg"))
+
+        try store.removeOrphanedAssets()
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: savedFolder.path), [try XCTUnwrap(saved.imageName)])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: damagedFolder.path).count, 1)
+    }
+
+    func testRemoveOrphanedAssetsDoesNothingWhileADraftIsUnreadable() throws {
+        let (root, store) = try fixture()
+        let orphan = root.appendingPathComponent("assets/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        try Data("maybe needed".utf8).write(to: orphan.appendingPathComponent(UUID().uuidString + ".jpg"))
+        try Data("{".utf8).write(to: root.appendingPathComponent("drafts/\(UUID().uuidString).json"))
+
+        try store.removeOrphanedAssets()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan.path))
+    }
+
     func testEditingNoteWithMissingMediaKeepsTextAndReferencesUntilExplicitRemoval() throws {
         let (root, store) = try fixture()
         var draft = try store.createDraft()

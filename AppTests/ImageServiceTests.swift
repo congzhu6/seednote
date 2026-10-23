@@ -68,11 +68,11 @@ final class ImageServiceTests: XCTestCase {
         XCTAssertThrowsError(try ImageService.prepare(Data(repeating: 0, count: 20 * 1024 * 1024 + 1)))
     }
 
-    func testImageAboveFortyMegapixelsIsRejectedBeforeNormalization() throws {
-        let pixels = Data(repeating: 255, count: 8001 * 5000)
+    private func grayPNG(width: Int, height: Int) throws -> Data {
+        let pixels = Data(repeating: 255, count: width * height)
         let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
-        let image = try XCTUnwrap(CGImage(width: 8001, height: 5000, bitsPerComponent: 8,
-                                         bitsPerPixel: 8, bytesPerRow: 8001,
+        let image = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8,
+                                         bitsPerPixel: 8, bytesPerRow: width,
                                          space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
                                          provider: provider, decode: nil, shouldInterpolate: false,
                                          intent: .defaultIntent))
@@ -81,7 +81,20 @@ final class ImageServiceTests: XCTestCase {
         CGImageDestinationAddImage(destination, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         XCTAssertLessThan(encoded.length, 20 * 1024 * 1024)
-        XCTAssertThrowsError(try ImageService.prepare(encoded as Data))
+        return encoded as Data
+    }
+
+    func testFortyEightMegapixelPhotoIsAccepted() throws {
+        // The full-resolution output of a 48 MP iPhone camera.
+        let output = try ImageService.prepare(grayPNG(width: 8064, height: 6048))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 2400)
+        XCTAssertEqual(decoded.height, 1800)
+    }
+
+    func testImageAboveFiftyMegapixelsIsRejectedBeforeNormalization() throws {
+        XCTAssertThrowsError(try ImageService.prepare(grayPNG(width: 10_001, height: 5000)))
     }
 
     func testVisionRecognizesActualPixelsWithoutInventedResult() async throws {

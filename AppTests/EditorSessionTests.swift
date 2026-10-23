@@ -169,6 +169,27 @@ import UIKit
         XCTAssertNil(saved.imageName)
         XCTAssertNil(saved.audioName)
     }
+    func testRemovingAvailableImageAlsoRemovesItsRecognizedText() throws {
+        var draft = try store.createDraft()
+        draft.note.thought = "Keep my thought"
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+        }
+        try store.attach(XCTUnwrap(image.pngData()), fileExtension: "png", to: &draft, kind: .image)
+        draft.note.ocrText = "Text read from the removed image"
+        draft.note.ocrState = .complete
+        let original = try store.commit(draft)
+        model.edit(original)
+        let session = try XCTUnwrap(model.session)
+        session.removeImage()
+        session.save()
+        let saved = try XCTUnwrap(store.list().first)
+        XCTAssertNil(saved.imageName)
+        XCTAssertEqual(saved.ocrText, "")
+        XCTAssertEqual(saved.ocrState, .notStarted)
+        XCTAssertEqual(saved.thought, "Keep my thought")
+    }
+
     func testFailedRecorderCallbackDoesNotAutomaticallyReplacePlayableOriginal() throws {
         var draft = try store.createDraft()
         draft.note.thought = "Keep existing recording"
@@ -273,6 +294,36 @@ import UIKit
         XCTAssertEqual(model.session?.id, first.id, "A second capture must not replace the open draft")
         XCTAssertNotNil(model.notice)
         XCTAssertTrue(model.drafts.contains { $0.note.sourceURL == "https://example.org/next" })
+    }
+
+    func testCapturedDraftOpensDirectlyAndStaysInStepWithItsStoredCopy() async throws {
+        try await model.receive(imageData: nil, sourceURL: "https://example.org/read", sourceText: "A passage", origin: "shortcutShare",
+                                trace: PerfTrace.begin("Capture", "test capture"))
+        let session = try XCTUnwrap(model.session)
+        let pending = try store.pendingDrafts()
+        XCTAssertEqual(pending.count, 1)
+        let stored = try XCTUnwrap(pending.first)
+        XCTAssertEqual(session.id, stored.id)
+        XCTAssertEqual(session.draft.note.sourceURL, "https://example.org/read")
+        XCTAssertEqual(session.draft.note.sourceText, "A passage")
+        XCTAssertEqual(session.draft.baseRevision, stored.baseRevision)
+        XCTAssertEqual(model.drafts.map(\.id), [stored.id])
+        XCTAssertNil(model.errorMessage)
+        // Opening without rereading must leave a draft the store still accepts.
+        session.change(\.thought, to: "My take")
+        XCTAssertNoThrow(try session.flush())
+        session.save()
+        XCTAssertEqual(try store.list().map(\.thought), ["My take"])
+        XCTAssertNil(model.session)
+    }
+
+    func testTranscriptionTimeoutGrowsWithRecordingLength() {
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: 5), .seconds(60))
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: 30), .seconds(60))
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: 95), .seconds(190))
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: 180), .seconds(360))
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: 0), .seconds(60))
+        XCTAssertEqual(LocalTranscriber.timeout(forAudioDuration: .nan), .seconds(60))
     }
 
     func testUnreadableRecordIsSurfacedWhileOtherIdeasStillLoad() throws {
